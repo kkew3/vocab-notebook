@@ -12,6 +12,7 @@ colorama
 # Merriam-Webster's Collegiate (R) Dictionary With Audio API key, which may be
 # acquired at Merriam-Webster's developer center
 requests
+fake-useragent
 
 ##############################
 # if you'd like to see a progress bar when the app initializes itself
