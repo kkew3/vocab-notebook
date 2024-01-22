@@ -18,3 +18,15 @@ pip install -r requirements.txt
 ```bash
 pip install .
 ```
+
+## Configuration example 配置文件示例
+
+见 `example_config.toml`.
+
+## Help 帮助
+
+执行以下命令以查看帮助:
+
+```bash
+python3 -m vocabnb --help
+```

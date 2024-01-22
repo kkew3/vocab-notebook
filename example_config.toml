@@ -1,0 +1,7 @@
+# rename this file as ~/.config/vocabnb/config.toml to take effect
+total = 50
+min = 10
+pronounce = false
+csvformat = "0,F:1,W:2,M:4,E"
+nbfile = "~/Documents/words.tsv"
+cachedir = "~/.cache/vocabnb"
