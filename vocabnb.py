@@ -133,8 +133,8 @@ def read_config(args: argparse.Namespace):
     for field in dataclasses.fields(Config):
         if field.name in cfgfile:
             setattr(cfg, field.name, cfgfile[field.name])
-        cmd_value = getattr(args, field.name) is not None
-        if cmd_value:
+        cmd_value = getattr(args, field.name)
+        if cmd_value is not None:
             setattr(cfg, field.name, cmd_value)
     if cfg.nbfile is not None:
         cfg.nbfile = Path(cfg.nbfile).expanduser()
