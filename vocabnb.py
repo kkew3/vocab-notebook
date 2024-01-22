@@ -141,3 +141,79 @@ def read_config(args: argparse.Namespace):
     if cfg.cachedir is not None:
         cfg.cachedir = Path(cfg.cachedir).expanduser()
     return cfg
+
+
+def parse_csvformat(csvformat: str):
+    name2ids = {}
+    for token in csvformat.split(':'):
+        col_id, _, col_name = token.partition(',')
+        col_id = int(col_id)
+        name2ids[col_name] = col_id
+    if set('FWME') != set(name2ids):
+        raise ValueError('all and only four F,W,M,E fields must be specified')
+    return name2ids
+
+
+class VocabBook:
+    def __init__(self, nbfile: Path, colname2ids: ty.Dict[str, int]):
+        self._data = []
+        self.colname2ids = colname2ids
+        self.nbfile = nbfile
+        self.modified = False
+
+    def __enter__(self):
+        with open(self.nbfile, encoding='utf-8', newline='') as infile:
+            reader = csv.reader(infile, delimiter='\t')
+            for row in reader:
+                self._data.append(list(row))
+        return self
+
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
+        """Write back if modified."""
+        if not self.modified:
+            return
+        with open(self.nbfile, 'w', encoding='utf-8', newline='') as outfile:
+            writer = csv.writer(outfile, delimiter='\t')
+            writer.writerows(self._data)
+
+    def __getitem__(
+        self,
+        item: ty.Union[ty.Tuple[ty.Literal['F', 'W', 'M', 'E'], int],
+                       ty.Literal['F']],
+    ) -> ty.Union[np.ndarray, int, ty.List[str], str]:
+        """
+        Examples:
+
+            vocab_book['F', 0]        -- get the first familiarity as int
+            vocab_book['W', 1]        -- get the second word
+            vocab_book['E', 3]        -- get the fourth list of examples
+            vocab_book['F']           -- get an int array of familiarities
+        """
+        if item == 'F':
+            j = self.colname2ids['F']
+            fam = [int(row[j]) for row in self._data[1:]]
+            return np.array(fam)
+        col_name, i = item
+        i += 1  # taking the header row into account
+        j = self.colname2ids[col_name]
+        value = self._data[i][j]
+        if col_name == 'F':
+            value = int(value)
+        elif col_name == 'E':
+            value = list(filter(None, (x.strip() for x in value.split('//'))))
+        return value
+
+    def __setitem__(self, key, value):
+        """
+        Set the ``key``-th familiarity to ``value``, where ``value`` must be
+        convertible to an int.
+
+        Examples:
+
+            vocab_book[2] = 3       -- set the third word's familiarity to 3
+        """
+        j = self.colname2ids['F']
+        i = key + 1  # taking the header row into account
+        value = str(int(value))
+        self._data[i][j] = value
+        self.modified = True
