@@ -12,6 +12,7 @@ colorama
 # Merriam-Webster's Collegiate (R) Dictionary With Audio API key, which may be
 # acquired at Merriam-Webster's developer center
 requests
+# the user-agent header will fallback to Safari's if this is not installed
 fake-useragent
 
 ##############################

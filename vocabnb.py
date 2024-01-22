@@ -25,10 +25,19 @@ else:
 
 try:
     import requests
-    from fake_useragent import UserAgent
     use_requests = True
 except ImportError:
     use_requests = False
+
+try:
+    from fake_useragent import UserAgent
+except ImportError:
+
+    class UserAgent:
+        # Safari header named as 'chrome' ...
+        chrome = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) '
+                  'Gecko/20100101 Firefox/109.0')
+
 
 try:
     from tqdm import tqdm
