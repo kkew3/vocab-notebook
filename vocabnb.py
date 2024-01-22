@@ -217,3 +217,86 @@ class VocabBook:
         value = str(int(value))
         self._data[i][j] = value
         self.modified = True
+
+
+if use_color:
+
+    class Colors:
+        BOLD_GREEN = '\033[1;32m'
+        BOLD_CYAN = '\033[1;36m'
+        BOLD_RED = '\033[1;31m'
+        RESET = '\033[0m'
+else:
+
+    class Colors:
+        BOLD_GREEN = ''
+        BOLD_CYAN = ''
+        BOLD_RED = ''
+        RESET = ''
+
+
+def qa_interface(book: VocabBook, j: int, i: int, T: int) -> bool:
+    """
+    Construct the Q&A interface for the j-th word in the vocabulary notebook.
+
+    :param book: the vocabulary notebook
+    :param j: the word index
+    :param i: the question index (1-based)
+    :param T: the total number of questions
+    :return: ``True`` if the user is familiar with current word
+    """
+    word = book['W', j]
+    print(f'{Colors.BOLD_GREEN}->{Colors.RESET} {word} '
+          f'{Colors.BOLD_GREEN}[{i}/{T}]{Colors.RESET}')
+    _ = input('[any key] ')
+    meaning = book['M', j]
+    examples = book['E', j]
+    print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {meaning}')
+    for k, e in enumerate(examples, 1):
+        print(f'{Colors.BOLD_CYAN}Example #{k} ->{Colors.RESET} {e}')
+    familiarity = book['F', j]
+    accepted_action = '.-=+12345'
+    fam_change = input(f'[{accepted_action}?] ')
+    while fam_change not in accepted_action:
+        if fam_change == '?':
+            print('=== HELP ===')
+            print(' .   -- keep current Familiarity Score (FS) unchanged')
+            print(' -   -- subtract 1 from FS')
+            print(' =   -- add 2 to FS')
+            print(' +   -- set FS to 5')
+            print(' NUM -- set FS to NUM')
+            print(' ?   -- print this help')
+            print('============')
+            fam_change = input(f'[{accepted_action}?] ')
+        else:
+            fam_change = input(f'{Colors.BOLD_RED}x{Colors.RESET} '
+                               f'[{accepted_action}?] ')
+    if fam_change == '.':
+        new_fam = familiarity
+    elif fam_change == '-':
+        new_fam = max(1, familiarity - 1)
+    elif fam_change == '=':
+        new_fam = min(5, familiarity + 2)
+    elif fam_change == '+':
+        new_fam = 5
+    else:
+        new_fam = min(5, max(0, int(fam_change)))
+    if new_fam != familiarity:
+        book[j] = new_fam
+    return new_fam == 1 or new_fam < familiarity
+
+
+def review_interface(book: VocabBook, indices: ty.List[int]) -> None:
+    """Construct the review interface given unfamiliar word indices."""
+    T = len(indices)
+    print(f'{Colors.BOLD_RED}=== Review ==={Colors.RESET}')
+    for i, j in enumerate(indices, 1):
+        print()
+        word = book['W', j]
+        print(f'{Colors.BOLD_RED}->{Colors.RESET} {word} '
+              f'{Colors.BOLD_RED}[{i}/{T}]{Colors.RESET}')
+        meaning = book['M', j]
+        examples = book['E', j]
+        print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {meaning}')
+        for k, e in enumerate(examples, 1):
+            print(f'{Colors.BOLD_CYAN}Example #{k} ->{Colors.RESET} {e}')
