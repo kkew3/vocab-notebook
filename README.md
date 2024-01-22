@@ -4,6 +4,7 @@
 
 按照 familiarity 随机采样生词本中的生词.
 Familiarity=1 表示很熟悉, =5 表示不熟悉.
+单词发音功能目前仅限 macOS 系统.
 
 ## Installation 安装
 

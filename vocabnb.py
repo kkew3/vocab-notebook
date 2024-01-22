@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import sys
 import typing as ty
 import csv
@@ -7,6 +8,8 @@ import itertools
 import argparse
 import readline
 import dataclasses
+from urllib import parse
+import subprocess
 
 import numpy as np
 import tomli
@@ -21,9 +24,24 @@ if sys.platform == 'win32':
 else:
     use_color = True
 
+try:
+    import requests
+    from fake_useragent import UserAgent
+    use_requests = True
+except ImportError:
+    use_requests = False
+
+try:
+    from tqdm import tqdm
+except ImportError:
+
+    def tqdm(it: ty.Iterable, *_args, **_kwargs):
+        return it
+
 
 def make_parser():
     parser = argparse.ArgumentParser(
+        prog='vocabnb',
         description=('Vocabulary notebook sampler.  '
                      'The vocabulary notebook should be a tab-separated '
                      'values (TSV) file. It should at the first line include '
@@ -64,6 +82,10 @@ def make_parser():
         '--cachedir',
         help=('if specified neither here nor in the configuration file, '
               'no cache will be made'))
+    parser.add_argument(
+        '--mwapi',
+        metavar='API_KEY',
+        help='the Merriam-Webster API key for pronouncing aloud')
     parser.add_argument(
         '-c',
         '--configfile',
@@ -120,6 +142,7 @@ class Config:
     csvformat: str = None
     nbfile: Path = None
     cachedir: Path = None
+    mwapi: str = None
 
 
 def read_config(args: argparse.Namespace):
@@ -235,7 +258,149 @@ else:
         RESET = ''
 
 
-def qa_interface(book: VocabBook, j: int, i: int, T: int) -> bool:
+def validate_filename(name: str) -> str:
+    tr = {':': '_', '/': '_', '\\': '_'}
+    for old, new in tr.items():
+        name = name.replace(old, new)
+    return name
+
+
+def parse_audio_url(name: str) -> str:
+    """
+    Parse audio basename as URL according to
+    https://dictionaryapi.com/products/json#sec-2.prs .
+
+    :param name: the audio basename
+    :return: the audio URL
+    """
+    if name.startswith('bix'):
+        subdir = 'bix'
+    elif name.startswith('gg'):
+        subdir = 'gg'
+    elif name[0].isdigit():
+        subdir = 'number'
+    elif name[0] in '_':  # may not be complete
+        subdir = 'number'
+    else:
+        subdir = name[0]
+    return (f'https://media.merriam-webster.com/audio/prons/en/us/mp3/'
+            f'{subdir}/{name}.mp3')
+
+
+def load_pronunciation(
+    book: VocabBook,
+    word_indices: ty.List[int],
+    api_key: str,
+    cachedir: Path,
+) -> ty.Dict[int, Path]:
+    """
+    Prerequisites:
+
+        - ``use_requests`` is ``True``
+        - ``cachedir`` is not ``None``
+        - ``sys.platform`` is ``darwin``
+
+    Returns a dictionary mapping word index to path to the audio file path.
+    """
+    cachedir.mkdir(parents=True, exist_ok=True)
+    loaded = {}
+    proxies = {}
+    if 'http_proxy' in os.environ:
+        proxies['http_proxy'] = os.environ['http_proxy']
+    if 'https_proxy' in os.environ:
+        proxies['https_proxy'] = os.environ['https_proxy']
+    for j in tqdm(word_indices, desc='init'):
+        word = book['W', j]
+        word_file = validate_filename(word)
+        cachefile = cachedir / (word_file + '.mp3')
+        if cachefile.is_file():
+            loaded[j] = cachefile
+            continue
+
+        word_url = (
+            'https://dictionaryapi.com/api/v3/references/collegiate/json/'
+            + parse.quote(word))
+        ua = UserAgent()
+        try:
+            resp = (
+                requests.get(
+                    word_url,
+                    params={
+                        'key': api_key,
+                    },
+                    headers={
+                        'user-agent': ua.chrome,
+                    },
+                    timeout=10,
+                    proxies=proxies).json())
+            prs_url = None
+            for item in resp:
+                hw = item['hwi']['hw'].replace('*', '')
+                if hw == word:
+                    try:
+                        prs_url = parse_audio_url(
+                            item['hwi']['prs'][0]['sound']['audio'])
+                    except (KeyError, IndexError):
+                        pass
+            if not prs_url:
+                continue
+
+            content = (
+                requests.get(
+                    prs_url,
+                    headers={
+                        'user-agent': ua.chrome,
+                    },
+                    timeout=10,
+                    proxies=proxies).content)
+            with open(cachefile, 'wb') as outfile:
+                outfile.write(content)
+            loaded[j] = cachefile
+        except (requests.exceptions.RequestException, TypeError):
+            tqdm.write(f'Failed to load pronunciation for word {word}')
+    return loaded
+
+
+def play_audio_file(audio_path: Path):
+    """Play audio file using QuickTime Player."""
+    args = [
+        'osascript',
+        '-e',
+        f'set theFile to POSIX FILE "{audio_path}"',
+        '-e',
+        'tell application "QuickTime Player"',
+        '-e',
+        'set theAudio to open file theFile',
+        '-e',
+        'tell theAudio',
+        '-e',
+        'set theDuration to duration',
+        '-e',
+        'play',
+        '-e',
+        'end tell',
+        '-e',
+        'delay theDuration + 1',
+        '-e',
+        'close theAudio',
+        '-e',
+        'quit',
+        '-e',
+        'end tell',
+    ]
+    try:
+        subprocess.run(args, check=True, timeout=7)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        pass
+
+
+def qa_interface(
+    book: VocabBook,
+    j: int,
+    i: int,
+    T: int,
+    prs: ty.Dict[int, Path],
+) -> bool:
     """
     Construct the Q&A interface for the j-th word in the vocabulary notebook.
 
@@ -243,11 +408,19 @@ def qa_interface(book: VocabBook, j: int, i: int, T: int) -> bool:
     :param j: the word index
     :param i: the question index (1-based)
     :param T: the total number of questions
+    :param prs: pronunciation dict mapping a word index to the pronunciation
+           audio path if exists
     :return: ``True`` if the user is familiar with current word
     """
     word = book['W', j]
+    if j in prs:
+        player_emoji = '🔈'
+    else:
+        player_emoji = ''
     print(f'{Colors.BOLD_GREEN}->{Colors.RESET} {word} '
-          f'{Colors.BOLD_GREEN}[{i}/{T}]{Colors.RESET}')
+          f'{Colors.BOLD_GREEN}[{i}/{T}]{Colors.RESET} {player_emoji}')
+    if j in prs:
+        play_audio_file(prs[j])
     _ = input('[any key] ')
     meaning = book['M', j]
     examples = book['E', j]
@@ -312,8 +485,14 @@ def main():
             fam = book['F']
             sampled_ind = sample_vocab(fam, cfg.total, cfg.min)
             T = len(sampled_ind)
+            if (cfg.pronounce and use_requests and cfg.mwapi and cfg.cachedir
+                    and sys.platform == 'darwin'):
+                prs = load_pronunciation(book, sampled_ind, cfg.mwapi,
+                                         cfg.cachedir)
+            else:
+                prs = {}
             for i, j in enumerate(sampled_ind, 1):
-                familiar = qa_interface(book, j, i, T)
+                familiar = qa_interface(book, j, i, T, prs)
                 if not familiar:
                     unfamiliar_indices.append(j)
             review_interface(book, unfamiliar_indices)
