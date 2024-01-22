@@ -257,7 +257,7 @@ def qa_interface(book: VocabBook, j: int, i: int, T: int) -> bool:
     familiarity = book['F', j]
     accepted_action = '.-=+12345'
     fam_change = input(f'[{accepted_action}?] ')
-    while fam_change not in accepted_action:
+    while not fam_change or fam_change not in accepted_action:
         if fam_change == '?':
             print('=== HELP ===')
             print(' .   -- keep current Familiarity Score (FS) unchanged')
