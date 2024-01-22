@@ -300,3 +300,26 @@ def review_interface(book: VocabBook, indices: ty.List[int]) -> None:
         print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {meaning}')
         for k, e in enumerate(examples, 1):
             print(f'{Colors.BOLD_CYAN}Example #{k} ->{Colors.RESET} {e}')
+
+
+def main():
+    args = make_parser().parse_args()
+    cfg = read_config(args)
+    colname2ids = parse_csvformat(cfg.csvformat)
+    try:
+        unfamiliar_indices = []
+        with VocabBook(cfg.nbfile, colname2ids) as book:
+            fam = book['F']
+            sampled_ind = sample_vocab(fam, cfg.total, cfg.min)
+            T = len(sampled_ind)
+            for i, j in enumerate(sampled_ind, 1):
+                familiar = qa_interface(book, j, i, T)
+                if not familiar:
+                    unfamiliar_indices.append(j)
+            review_interface(book, unfamiliar_indices)
+    except (KeyboardInterrupt, EOFError):
+        print('Aborted', file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()
