@@ -6,6 +6,7 @@ from pathlib import Path
 import itertools
 import argparse
 import readline
+import dataclasses
 
 import numpy as np
 import tomli
@@ -112,3 +113,34 @@ def sample_vocab(
     j = np.concatenate((j5, jnon5))
     np.random.shuffle(j)
     return j.tolist()
+
+
+@dataclasses.dataclass(init=False, eq=False)
+class Config:
+    total: int = None
+    min: int = None
+    pronounce: bool = None
+    csvformat: str = None
+    nbfile: Path = None
+    cachedir: Path = None
+
+
+def read_config(args: argparse.Namespace):
+    if args.configfile:
+        filename = args.configfile
+    else:
+        filename = Path('~/.config/vocabnb/config.toml').expanduser()
+    with open(filename, 'rb') as infile:
+        cfgfile = tomli.load(infile)
+    cfg = Config()
+    for field in dataclasses.fields(Config):
+        if field.name in cfgfile:
+            setattr(cfg, field.name, cfgfile[field.name])
+        cmd_value = getattr(args, field.name) is not None
+        if cmd_value:
+            setattr(cfg, field.name, cmd_value)
+    if cfg.nbfile is not None:
+        cfg.nbfile = Path(cfg.nbfile).expanduser()
+    if cfg.cachedir is not None:
+        cfg.cachedir = Path(cfg.cachedir).expanduser()
+    return cfg
