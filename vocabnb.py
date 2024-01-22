@@ -35,10 +35,7 @@ def make_parser():
                      'a TSV cell. If there\'s no example, leave that cell '
                      'empty.'))
     parser.add_argument(
-        '-T',
-        '--total',
-        type=int,
-        help='total number of words to sample')
+        '-T', '--total', type=int, help='total number of words to sample')
     parser.add_argument(
         '-m',
         '--min',
