@@ -49,7 +49,6 @@ except ImportError:
 
 def make_parser():
     parser = argparse.ArgumentParser(
-        prog='vocabnb',
         description=('Vocabulary notebook sampler.  '
                      'The vocabulary notebook should be a tab-separated '
                      'values (TSV) file. It should at the first line include '
