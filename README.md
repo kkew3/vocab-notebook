@@ -8,6 +8,8 @@ Familiarity=1 表示很熟悉, =5 表示不熟悉.
 
 ## Installation 安装
 
+需要 Python>=3.8.
+
 首先, 阅读 `requirements.txt`, 注释掉你不需要的依赖, 然后 (推荐在虚拟环境中),
 
 ```bash
