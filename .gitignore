@@ -1,0 +1,7 @@
+conda_env
+*.pyc
+*.swp
+build/
+*.egg-info/
+.idea/
+venv/
