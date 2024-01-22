@@ -37,3 +37,7 @@ pip install .
 ```bash
 python3 -m vocabnb --help
 ```
+
+## License
+
+MIT.
