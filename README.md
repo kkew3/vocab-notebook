@@ -23,6 +23,10 @@ pip install .
 
 见 `example_config.toml`.
 
+## Vocabulary book example 单词表示例
+
+见 `example_vocab_notebook.tsv`.
+
 ## Help 帮助
 
 执行以下命令以查看帮助:
