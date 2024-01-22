@@ -4,7 +4,6 @@ import sys
 import typing as ty
 import csv
 from pathlib import Path
-import itertools
 import argparse
 import readline
 import dataclasses
