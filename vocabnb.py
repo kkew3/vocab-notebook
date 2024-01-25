@@ -266,7 +266,7 @@ else:
 
 
 def validate_filename(name: str) -> str:
-    tr = {':': '_', '/': '_', '\\': '_'}
+    tr = {':': '_', '/': '_', '\\': '_', '"': '_'}
     for old, new in tr.items():
         name = name.replace(old, new)
     return name
