@@ -9,6 +9,8 @@ import readline
 import dataclasses
 from urllib import parse
 import subprocess
+import contextlib
+import shutil
 
 import numpy as np
 import tomli
@@ -368,37 +370,33 @@ def load_pronunciation(
     return loaded
 
 
-def play_audio_file(audio_path: Path):
-    """Play audio file using QuickTime Player."""
-    args = [
-        'osascript',
-        '-e',
-        f'set theFile to POSIX FILE "{audio_path}"',
-        '-e',
-        'tell application "QuickTime Player"',
-        '-e',
-        'set theAudio to open file theFile',
-        '-e',
-        'tell theAudio',
-        '-e',
-        'set theDuration to duration',
-        '-e',
-        'play',
-        '-e',
-        'end tell',
-        '-e',
-        'delay theDuration + 1',
-        '-e',
-        'close theAudio',
-        '-e',
-        'quit',
-        '-e',
-        'end tell',
-    ]
-    try:
-        subprocess.run(args, check=True, timeout=7)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        pass
+def prepare_cmds_from_applescript(applescript: str, *argv):
+    cmd = ['osascript']
+    for stmt in applescript.split('\n'):
+        stmt = stmt.strip()
+        if stmt:
+            cmd.extend(['-e', stmt])
+    cmd.extend(argv)
+    return cmd
+
+
+def qtplayer_play_audio():
+    """Applescript that plays audio using QuickTime Player."""
+    return '''\
+on run argv
+    set theFile to the first item of argv
+    set theFile to POSIX file theFile
+    tell application "QuickTime Player"
+        set theAudio to open file theFile
+        tell theAudio
+            set theDuration to duration
+            play
+        end tell
+        delay theDuration + 1
+        close theAudio
+        quit
+    end tell
+end run'''
 
 
 def qa_interface(
@@ -427,30 +425,39 @@ def qa_interface(
     print(f'{Colors.BOLD_GREEN}->{Colors.RESET} {word} '
           f'{Colors.BOLD_GREEN}[{i}/{T}]{Colors.RESET} {player_emoji}')
     if j in prs:
-        play_audio_file(prs[j])
-    _ = input('[any key] ')
-    meaning = book['M', j]
-    examples = book['E', j]
-    print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {meaning}')
-    for k, e in enumerate(examples, 1):
-        print(f'{Colors.BOLD_CYAN}Example #{k} ->{Colors.RESET} {e}')
-    familiarity = book['F', j]
-    accepted_action = '.-=+12345'
-    fam_change = input(f'[{accepted_action}?] ')
-    while not fam_change or fam_change not in accepted_action:
-        if fam_change == '?':
-            print('=== HELP ===')
-            print(' .   -- keep current Familiarity Score (FS) unchanged')
-            print(' -   -- subtract 1 from FS')
-            print(' =   -- add 2 to FS')
-            print(' +   -- set FS to 5')
-            print(' NUM -- set FS to NUM')
-            print(' ?   -- print this help')
-            print('============')
-            fam_change = input(f'[{accepted_action}?] ')
-        else:
-            fam_change = input(f'{Colors.BOLD_RED}x{Colors.RESET} '
-                               f'[{accepted_action}?] ')
+        cmds = prepare_cmds_from_applescript(qtplayer_play_audio(),
+                                             str(prs[j]))
+        proc = subprocess.Popen(
+            cmds, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        proc = contextlib.nullcontext()
+    with proc:
+        _ = input('[any key] ')
+        meaning = book['M', j]
+        examples = book['E', j]
+        print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {meaning}')
+        for k, e in enumerate(examples, 1):
+            print(f'{Colors.BOLD_CYAN}Example #{k} ->{Colors.RESET} {e}')
+        familiarity = book['F', j]
+        accepted_action = '.-=+12345'
+        fam_change = input(f'[{accepted_action}?] ')
+        while not fam_change or fam_change not in accepted_action:
+            if fam_change == '?':
+                print('=== HELP ===')
+                print(' .   -- keep current Familiarity Score (FS) unchanged')
+                print(' -   -- subtract 1 from FS')
+                print(' =   -- add 2 to FS')
+                print(' +   -- set FS to 5')
+                print(' NUM -- set FS to NUM')
+                print(' ?   -- print this help')
+                print('============')
+                fam_change = input(f'[{accepted_action}?] ')
+            else:
+                fam_change = input(f'{Colors.BOLD_RED}x{Colors.RESET} '
+                                   f'[{accepted_action}?] ')
+        # `proc` may be a nullcontext object
+        with contextlib.suppress(AttributeError):
+            proc.terminate()
     if fam_change == '.':
         new_fam = familiarity
     elif fam_change == '-':
