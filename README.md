@@ -4,7 +4,7 @@
 
 按照 familiarity 随机采样生词本中的生词.
 Familiarity=1 表示很熟悉, =5 表示不熟悉.
-单词发音功能目前仅限 macOS 系统.
+单词发音功能依赖 [`mpg123`](https://www.mpg123.de); 如果没找到但系统为 macOS, 则会使用 `osascript` 调用 QuickTime Player; 否则, 自动禁用发音.
 
 ## Installation 安装
 
