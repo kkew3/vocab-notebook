@@ -49,6 +49,9 @@ except ImportError:
         return it
 
 
+use_mpg123 = shutil.which('mpg123') is not None
+
+
 def make_parser():
     parser = argparse.ArgumentParser(
         description=('Vocabulary notebook sampler.  '
@@ -425,8 +428,11 @@ def qa_interface(
     print(f'{Colors.BOLD_GREEN}->{Colors.RESET} {word} '
           f'{Colors.BOLD_GREEN}[{i}/{T}]{Colors.RESET} {player_emoji}')
     if j in prs:
-        cmds = prepare_cmds_from_applescript(qtplayer_play_audio(),
-                                             str(prs[j]))
+        if use_mpg123:
+            cmds = ['mpg123', str(prs[j])]
+        else:
+            cmds = prepare_cmds_from_applescript(qtplayer_play_audio(),
+                                                 str(prs[j]))
         proc = subprocess.Popen(
             cmds, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
