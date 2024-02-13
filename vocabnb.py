@@ -427,7 +427,7 @@ def qa_interface(
         player_emoji = ''
     print(f'{Colors.BOLD_GREEN}->{Colors.RESET} {word} '
           f'{Colors.BOLD_GREEN}[{i}/{T}]{Colors.RESET} {player_emoji}')
-    if j in prs:
+    if j in prs and (use_mpg123 or sys.platform == 'darwin'):
         if use_mpg123:
             cmds = ['mpg123', str(prs[j])]
         else:
