@@ -518,7 +518,3 @@ def main():
             review_interface(book, unfamiliar_indices)
     except (KeyboardInterrupt, EOFError):
         print('Aborted', file=sys.stderr)
-
-
-if __name__ == '__main__':
-    main()
