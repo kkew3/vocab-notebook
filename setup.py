@@ -1,24 +1,32 @@
-from setuptools import setup
-import sys
+from pathlib import Path
+from urllib.parse import quote
 
-install_requires = ['numpy', 'tomli']
-extra_requires_color = []
-if sys.platform == 'win32':
-    extra_requires_color.append('colorama')
-extra_requires_init_progress = ['tqdm']
-extra_requires_pronounce = ['requests']
-if sys.platform != 'darwin':
-    extra_requires_pronounce.append('fake-useragent')
+from setuptools import setup
+
+
+def read_requirements(name='default'):
+    with (Path('requirements') / f'{name}.txt').open(encoding='utf-8') as f:
+        return [
+            line.strip()
+            for line in f
+            if line.strip() and not line.startswith('#')
+        ]
+
+
+def get_pronounce_dep_helper():
+    path = quote(str(Path(__file__).parent / 'pronounce_dep_helper'))
+    return [f'pronounce_dep_helper @ file://{path}']
+
 
 setup(
     name='vocabnb',
     py_modules=['vocabnb'],
     version='0.3.1',
-    install_requires=install_requires,
+    install_requires=read_requirements(),
     extras_require={
-        'color': extra_requires_color,
-        'init-progress': extra_requires_init_progress,
-        'pronounce': extra_requires_pronounce,
+        'dev': read_requirements('dev'),
+        'pronounce':
+        read_requirements('pronounce') + get_pronounce_dep_helper(),
     },
     entry_points={
         'console_scripts': [
