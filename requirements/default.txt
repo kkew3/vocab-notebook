@@ -1,6 +1,4 @@
 click
-fake-useragent
 numpy
 tomli
 colorama
-tqdm
