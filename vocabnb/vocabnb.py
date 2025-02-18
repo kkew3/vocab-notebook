@@ -348,7 +348,7 @@ def query(dbfile: Path, word: str):
         word_def = book.get_word_def(word)
         if word_def:
             yaml.dump(
-                word_def,
+                dataclasses.asdict(word_def),
                 stream=sys.stdout,
                 allow_unicode=True,
                 sort_keys=False)
