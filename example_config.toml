@@ -10,5 +10,5 @@ do_pronounce = false
 dbfile = "~/Documents/words.db"
 # 单词读音文件想要缓存在哪里，如果不想启用发音，可以不指定
 cachedir = "~/.cache/vocabnb"
-# 用于请求单词发音的 Merriam-Webster API，如果不想启用发音，可以不指定
+# 用于请求单词发音的 Merriam-Webster API key，如果不想启用发音，可以不指定
 mwapi = "**************"

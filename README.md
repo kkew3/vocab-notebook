@@ -23,7 +23,7 @@ pipx install 'vocabnb @ git+https://github.com/kkew3/vocab-notebook.git'
 
 见 [`example_config.toml`](./example_config.toml)。
 
-Merriam-Webster API 可以在[这里](https://dictionaryapi.com/products/index)免费获取。
+Merriam-Webster API key 可以在[这里](https://dictionaryapi.com/products/index)免费获取。
 
 ## 使用
 
