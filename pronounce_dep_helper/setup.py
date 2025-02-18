@@ -25,4 +25,5 @@ setup(
     description=(
         'Helper package for managing dependencies for `pronounce` feature'),
     version='0.1.0',
+    py_modules=['pronounce_activated'],
 )
