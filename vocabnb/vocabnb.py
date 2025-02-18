@@ -1,117 +1,34 @@
-#!/usr/bin/env python3
-import os
 import sys
-import typing as ty
-import csv
 from pathlib import Path
-import argparse
 import readline
 import dataclasses
-from urllib import parse
-import subprocess
 import contextlib
-import shutil
+import sqlite3
+import datetime
+from typing import Literal
 
 import numpy as np
 import tomli
+import colorama
+import click
 
-if sys.platform == 'win32':
-    try:
-        import colorama
-        colorama.just_fix_windows_console()
-        use_color = True
-    except ImportError:
-        use_color = False
-else:
-    use_color = True
-
+from vocabnb import db
 try:
-    import requests
-    use_requests = True
+    import pronounce_activated
+    from vocabnb import pronounce
+    USE_PRONOUNCE = True
 except ImportError:
-    use_requests = False
+    USE_PRONOUNCE = False
 
-try:
-    from fake_useragent import UserAgent
-except ImportError:
-
-    class UserAgent:
-        # Safari header named as 'chrome' ...
-        chrome = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) '
-                  'Gecko/20100101 Firefox/109.0')
-
-
-try:
-    from tqdm import tqdm
-except ImportError:
-
-    def tqdm(it: ty.Iterable, *_args, **_kwargs):
-        return it
-
-
-use_mpg123 = shutil.which('mpg123') is not None
-
-
-def make_parser():
-    parser = argparse.ArgumentParser(
-        description=('Vocabulary notebook sampler.  '
-                     'The vocabulary notebook should be a tab-separated '
-                     'values (TSV) file. It should at the first line include '
-                     'a header line, and as columns contain at least these '
-                     'fields: a familiarity score, the word, the meaning, '
-                     'and some examples. The familiarity scores are integers '
-                     'ranging from 1 to 5, with 1 being the most unfamiliar '
-                     'words. Multiple examples may be separated by " // " in '
-                     'a TSV cell. If there\'s no example, leave that cell '
-                     'empty.'))
-    parser.add_argument(
-        '-T', '--total', type=int, help='total number of words to sample')
-    parser.add_argument(
-        '-m',
-        '--min',
-        help='min number of non-5 familiarity scored words to sample')
-    parser.add_argument(
-        '-P',
-        '--pronounce',
-        action='store_true',
-        help=('to pronounce aloud every sampled word as long as '
-              'there\'s a pronunciation for it; note that this will slow '
-              'down the initialization of the app'))
-    parser.add_argument(
-        '--csvformat',
-        metavar='COL_ID,COL_NAME:...',
-        help=('specify which field can be found at which column id (0-based), '
-              'where the field names are: (F)amiliarity, (W)ord, (M)eaning, '
-              'and (E)xample [e.g.: "0,F:1,W:2,M:4,E"] [default: the one '
-              'specified in `~/.config/vocabnb/config.toml`]'))
-    parser.add_argument(
-        '-f',
-        '--nbfile',
-        type=Path,
-        help='the path to the vocabulary notebook file')
-    parser.add_argument(
-        '-C',
-        '--cachedir',
-        help=('if specified neither here nor in the configuration file, '
-              'no cache will be made'))
-    parser.add_argument(
-        '--mwapi',
-        metavar='API_KEY',
-        help='the Merriam-Webster API key for pronouncing aloud')
-    parser.add_argument(
-        '-c',
-        '--configfile',
-        type=Path,
-        help=('use CONFIGFILE as the configuration file rather than '
-              '`~/.config/vocabnb/config.toml`'))
-    return parser
+colorama.just_fix_windows_console()
 
 
 def sample_vocab(
+    words,
     fam,
     max_total_vocab: int,
     min_non5_vocab: int,
-) -> ty.List[int]:
+) -> list[str]:
     """
     Sample words according to familiarity scores.
 
@@ -124,327 +41,128 @@ def sample_vocab(
           ``min_non5_vocab``)) words, sample without replacement, where the
           sampling weights are exp(familiarity scores <=4)
 
+    :param words: the words, string array
     :param fam: the familiarity scores of the vocabulary, int array
     :param max_total_vocab: max number of words to sample
     :param min_non5_vocab: min number of non-5 scored words to sample, which
            takes precedence over ``max_total_vocab``
-    :return: list of word indices
+    :return: list of words
     """
     fam = np.copy(fam)
-    N = fam.shape[0]
+    n = fam.shape[0]
     j5 = np.nonzero(fam == 5)[0]
-    N5 = j5.shape[0]
-    n_non5_samples = min(N - N5, max(max_total_vocab - N5, min_non5_vocab))
+    n5 = j5.shape[0]
+    n_non5_samples = min(n - n5, max(max_total_vocab - n5, min_non5_vocab))
     fam[j5] = -999999999  # so that j5 words will not be repeatedly sampled
     # See https://timvieira.github.io/blog/post/2019/09/16/algorithms-for-sampling-without-replacement/
-    G = np.random.gumbel(0, 1, size=N)
-    G += fam.astype(float)
-    G *= -1
-    jnon5 = np.argsort(G)[:n_non5_samples]
+    gg = np.random.gumbel(0, 1, size=n)
+    gg += fam.astype(float)
+    gg *= -1
+    jnon5 = np.argsort(gg)[:n_non5_samples]
     j = np.concatenate((j5, jnon5))
     np.random.shuffle(j)
-    return j.tolist()
+    return words[j].tolist()
 
 
-@dataclasses.dataclass(init=False, eq=False)
-class Config:
-    total: int = None
-    min: int = None
-    pronounce: bool = None
-    csvformat: str = None
-    nbfile: Path = None
-    cachedir: Path = None
-    mwapi: str = None
+@dataclasses.dataclass
+class WordDef:
+    word: str
+    meaning: str
+    pronunciation: str | None
+    examples: list[str]
+    familiarity: int
 
 
-def read_config(args: argparse.Namespace):
-    if args.configfile:
-        filename = args.configfile
-    else:
-        filename = Path('~/.config/vocabnb/config.toml').expanduser()
-    with open(filename, 'rb') as infile:
-        cfgfile = tomli.load(infile)
-    cfg = Config()
-    for field in dataclasses.fields(Config):
-        if field.name in cfgfile:
-            setattr(cfg, field.name, cfgfile[field.name])
-        cmd_value = getattr(args, field.name)
-        if cmd_value is not None:
-            setattr(cfg, field.name, cmd_value)
-    if cfg.nbfile is not None:
-        cfg.nbfile = Path(cfg.nbfile).expanduser()
-    if cfg.cachedir is not None:
-        cfg.cachedir = Path(cfg.cachedir).expanduser()
-    return cfg
-
-
-def parse_csvformat(csvformat: str):
-    name2ids = {}
-    for token in csvformat.split(':'):
-        col_id, _, col_name = token.partition(',')
-        col_id = int(col_id)
-        name2ids[col_name] = col_id
-    if set('FWME') != set(name2ids):
-        raise ValueError('all and only four F,W,M,E fields must be specified')
-    return name2ids
+@dataclasses.dataclass
+class WordFam:
+    word: str
+    familiarity: int
 
 
 class VocabBook:
-    def __init__(self, nbfile: Path, colname2ids: ty.Dict[str, int]):
-        self._data = []
-        self.colname2ids = colname2ids
-        self.nbfile = nbfile
-        self.modified = False
+    def __init__(self, db_file: Path | sqlite3.Connection):
+        if isinstance(db_file, sqlite3.Connection):
+            self.conn = db_file
+        else:
+            self.conn = sqlite3.connect(db_file)
+            db.init_db_if_not_exists(self.conn)
+        # Words whose familiarity scores have been updated.
+        self._updated_word_fam = []
+        # Memo
+        self._memo = []
+
+    def get_word_def(self, word: str):
+        return WordDef(**db.find_word(self.conn, word))
+
+    def get_all_fam(self):
+        return [WordFam(**row) for row in db.find_all_words_fam(self.conn)]
+
+    def add_fam_update(self, familiarity: int, word: str):
+        self._updated_word_fam.append((familiarity, word))
+
+    def add_memo(
+        self,
+        word: str,
+        date: datetime.datetime,
+        orig_familiarity: int,
+        action: Literal['+', '=', '-', '.'] | int,
+    ):
+        self._memo.append((word, date, orig_familiarity, action))
 
     def __enter__(self):
-        with open(self.nbfile, encoding='utf-8', newline='') as infile:
-            reader = csv.reader(infile, delimiter='\t')
-            for row in reader:
-                self._data.append(list(row))
         return self
 
-    def __exit__(self, _exc_type, _exc_val, _exc_tb):
-        """Write back if modified."""
-        if not self.modified:
-            return
-        with open(self.nbfile, 'w', encoding='utf-8', newline='') as outfile:
-            writer = csv.writer(outfile, delimiter='\t')
-            writer.writerows(self._data)
-
-    def __getitem__(
-        self,
-        item: ty.Union[ty.Tuple[ty.Literal['F', 'W', 'M', 'E'], int],
-                       ty.Literal['F']],
-    ) -> ty.Union[np.ndarray, int, ty.List[str], str]:
-        """
-        Examples:
-
-            vocab_book['F', 0]        -- get the first familiarity as int
-            vocab_book['W', 1]        -- get the second word
-            vocab_book['E', 3]        -- get the fourth list of examples
-            vocab_book['F']           -- get an int array of familiarities
-        """
-        if item == 'F':
-            j = self.colname2ids['F']
-            fam = [int(row[j]) for row in self._data[1:]]
-            return np.array(fam)
-        col_name, i = item
-        i += 1  # taking the header row into account
-        j = self.colname2ids[col_name]
-        value = self._data[i][j]
-        if col_name == 'F':
-            value = int(value)
-        elif col_name == 'E':
-            value = list(filter(None, (x.strip() for x in value.split('//'))))
-        return value
-
-    def __setitem__(self, key, value):
-        """
-        Set the ``key``-th familiarity to ``value``, where ``value`` must be
-        convertible to an int.
-
-        Examples:
-
-            vocab_book[2] = 3       -- set the third word's familiarity to 3
-        """
-        j = self.colname2ids['F']
-        i = key + 1  # taking the header row into account
-        value = str(int(value))
-        self._data[i][j] = value
-        self.modified = True
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Commit change only if no error happens.
+        if exc_type is None and exc_val is None and exc_tb is None:
+            with self.conn:
+                db.update_word_familiarities(self.conn, self._updated_word_fam,
+                                             True)
+                db.insert_memos(self.conn, self._memo, True)
 
 
-if use_color:
-
-    class Colors:
-        BOLD_GREEN = '\033[1;32m'
-        BOLD_CYAN = '\033[1;36m'
-        BOLD_RED = '\033[1;31m'
-        RESET = '\033[0m'
-else:
-
-    class Colors:
-        BOLD_GREEN = ''
-        BOLD_CYAN = ''
-        BOLD_RED = ''
-        RESET = ''
-
-
-def validate_filename(name: str) -> str:
-    tr = {':': '_', '/': '_', '\\': '_', '"': '_'}
-    for old, new in tr.items():
-        name = name.replace(old, new)
-    return name
-
-
-def parse_audio_url(name: str) -> str:
-    """
-    Parse audio basename as URL according to
-    https://dictionaryapi.com/products/json#sec-2.prs .
-
-    :param name: the audio basename
-    :return: the audio URL
-    """
-    if name.startswith('bix'):
-        subdir = 'bix'
-    elif name.startswith('gg'):
-        subdir = 'gg'
-    elif name[0].isdigit():
-        subdir = 'number'
-    elif name[0] in '_':  # may not be complete
-        subdir = 'number'
-    else:
-        subdir = name[0]
-    return (f'https://media.merriam-webster.com/audio/prons/en/us/mp3/'
-            f'{subdir}/{name}.mp3')
-
-
-def load_pronunciation(
-    book: VocabBook,
-    word_indices: ty.List[int],
-    api_key: str,
-    cachedir: Path,
-) -> ty.Dict[int, Path]:
-    """
-    Prerequisites:
-
-        - ``use_requests`` is ``True``
-        - ``cachedir`` is not ``None``
-        - ``sys.platform`` is ``darwin``
-
-    Returns a dictionary mapping word index to path to the audio file path.
-    """
-    cachedir.mkdir(parents=True, exist_ok=True)
-    loaded = {}
-    proxies = {}
-    if 'http_proxy' in os.environ:
-        proxies['http_proxy'] = os.environ['http_proxy']
-    if 'https_proxy' in os.environ:
-        proxies['https_proxy'] = os.environ['https_proxy']
-    for j in tqdm(word_indices, desc='init'):
-        word = book['W', j]
-        word_file = validate_filename(word)
-        cachefile = cachedir / (word_file + '.mp3')
-        if cachefile.is_file():
-            loaded[j] = cachefile
-            continue
-
-        word_url = (
-            'https://dictionaryapi.com/api/v3/references/collegiate/json/'
-            + parse.quote(word))
-        ua = UserAgent()
-        try:
-            resp = (
-                requests.get(
-                    word_url,
-                    params={
-                        'key': api_key,
-                    },
-                    headers={
-                        'user-agent': ua.chrome,
-                    },
-                    timeout=10,
-                    proxies=proxies).json())
-            prs_url = None
-            for item in resp:
-                hw = item['hwi']['hw'].replace('*', '')
-                if hw == word:
-                    try:
-                        prs_url = parse_audio_url(
-                            item['hwi']['prs'][0]['sound']['audio'])
-                    except (KeyError, IndexError):
-                        pass
-            if not prs_url:
-                continue
-
-            content = (
-                requests.get(
-                    prs_url,
-                    headers={
-                        'user-agent': ua.chrome,
-                    },
-                    timeout=10,
-                    proxies=proxies).content)
-            with open(cachefile, 'wb') as outfile:
-                outfile.write(content)
-            loaded[j] = cachefile
-        except (requests.exceptions.RequestException, TypeError):
-            tqdm.write(f'Failed to load pronunciation for word {word}')
-    return loaded
-
-
-def prepare_cmds_from_applescript(applescript: str, *argv):
-    cmd = ['osascript']
-    for stmt in applescript.split('\n'):
-        stmt = stmt.strip()
-        if stmt:
-            cmd.extend(['-e', stmt])
-    cmd.extend(argv)
-    return cmd
-
-
-def qtplayer_play_audio():
-    """Applescript that plays audio using QuickTime Player."""
-    return '''\
-on run argv
-    set theFile to the first item of argv
-    set theFile to POSIX file theFile
-    tell application "QuickTime Player"
-        set theAudio to open file theFile
-        tell theAudio
-            set theDuration to duration
-            play
-        end tell
-        delay theDuration + 1
-        close theAudio
-        quit
-    end tell
-end run'''
+class Colors:
+    BOLD_GREEN = '\033[1;32m'
+    BOLD_CYAN = '\033[1;36m'
+    BOLD_RED = '\033[1;31m'
+    RESET = '\033[0m'
 
 
 def qa_interface(
     book: VocabBook,
-    j: int,
     i: int,
+    word: str,
     T: int,
-    prs: ty.Dict[int, Path],
+    prs: dict[str, Path],
 ) -> bool:
     """
     Construct the Q&A interface for the j-th word in the vocabulary notebook.
 
     :param book: the vocabulary notebook
-    :param j: the word index
     :param i: the question index (1-based)
+    :param word: the word to question
     :param T: the total number of questions
     :param prs: pronunciation dict mapping a word index to the pronunciation
            audio path if exists
     :return: ``True`` if the user is familiar with current word
     """
-    word = book['W', j]
-    if j in prs:
+    if word in prs:
         player_emoji = '🔈'
     else:
         player_emoji = ''
     print(f'{Colors.BOLD_GREEN}->{Colors.RESET} {word} '
           f'{Colors.BOLD_GREEN}[{i}/{T}]{Colors.RESET} {player_emoji}')
-    if j in prs and (use_mpg123 or sys.platform == 'darwin'):
-        if use_mpg123:
-            cmds = ['mpg123', str(prs[j])]
-        else:
-            cmds = prepare_cmds_from_applescript(qtplayer_play_audio(),
-                                                 str(prs[j]))
-        proc = subprocess.Popen(
-            cmds, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if word in prs and USE_PRONOUNCE:
+        proc = pronounce.get_pronounce_process(prs[word])
     else:
         proc = contextlib.nullcontext()
     with proc:
         _ = input('[any key] ')
-        meaning = book['M', j]
-        examples = book['E', j]
-        print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {meaning}')
-        for k, e in enumerate(examples, 1):
+        word_def = book.get_word_def(word)
+        print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {word_def.meaning}')
+        for k, e in enumerate(word_def.examples, 1):
             print(f'{Colors.BOLD_CYAN}Example #{k} ->{Colors.RESET} {e}')
-        familiarity = book['F', j]
+        familiarity = word_def.familiarity
         accepted_action = '.-=+12345'
         fam_change = input(f'[{accepted_action}?] ')
         while not fam_change or fam_change not in accepted_action:
@@ -461,9 +179,12 @@ def qa_interface(
             else:
                 fam_change = input(f'{Colors.BOLD_RED}x{Colors.RESET} '
                                    f'[{accepted_action}?] ')
-        # `proc` may be a nullcontext object
-        with contextlib.suppress(AttributeError):
+        if fam_change not in '.-=+':
+            fam_change = min(5, max(0, int(fam_change)))
+        if word in prs and USE_PRONOUNCE:
             proc.terminate()
+    today = datetime.datetime.now()
+    book.add_memo(word, today, familiarity, fam_change)
     if fam_change == '.':
         new_fam = familiarity
     elif fam_change == '-':
@@ -473,48 +194,131 @@ def qa_interface(
     elif fam_change == '+':
         new_fam = 5
     else:
-        new_fam = min(5, max(0, int(fam_change)))
+        new_fam = fam_change
     if new_fam != familiarity:
-        book[j] = new_fam
+        book.add_fam_update(new_fam, word)
     return new_fam == 1 or new_fam < familiarity
 
 
-def review_interface(book: VocabBook, indices: ty.List[int]) -> None:
+def review_interface(book: VocabBook, words: list[str]) -> None:
     """Construct the review interface given unfamiliar word indices."""
-    T = len(indices)
+    T = len(words)
     print(f'{Colors.BOLD_RED}=== Review ==={Colors.RESET}')
-    for i, j in enumerate(indices, 1):
+    for i, word in enumerate(words, 1):
         print()
-        word = book['W', j]
+        word_def = book.get_word_def(word)
         print(f'{Colors.BOLD_RED}->{Colors.RESET} {word} '
               f'{Colors.BOLD_RED}[{i}/{T}]{Colors.RESET}')
-        meaning = book['M', j]
-        examples = book['E', j]
-        print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {meaning}')
-        for k, e in enumerate(examples, 1):
+        print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {word_def.meaning}')
+        for k, e in enumerate(word_def.examples, 1):
             print(f'{Colors.BOLD_CYAN}Example #{k} ->{Colors.RESET} {e}')
 
 
-def main():
-    args = make_parser().parse_args()
-    cfg = read_config(args)
-    colname2ids = parse_csvformat(cfg.csvformat)
+def read_config(ctx, _param, value):
+    with contextlib.suppress(FileNotFoundError):
+        with open(value, 'rb') as infile:
+            config = tomli.load(infile)
+        config['cachedir'] = Path(config['cachedir']).expanduser()
+        ctx.default_map = config
+
+
+if USE_PRONOUNCE:
+    pronounce_opt = click.option(
+        '-P',
+        '--pronounce/--no-pronounce',
+        'do_pronounce',
+        help=('To pronounce aloud every sampled word as long as '
+              'there\'s a pronunciation for it; note that this will slow '
+              'down the initialization of the app.'),
+    )
+else:
+    pronounce_opt = click.option(
+        ' /--no-pronounce',
+        'do_pronounce',
+        help='Pronunciation has been disabled.')
+
+
+@click.command(
+    context_settings={'auto_envvar_prefix': 'VOCABNB'},
+    help='Vocabulary notebook sampler.',
+)
+@click.option(
+    '-f',
+    '--config',
+    'config_file',
+    default=Path('~/.config/vocabnb/config.toml').expanduser(),
+    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    callback=read_config,
+    is_eager=True,
+    expose_value=False,
+    help='Read config from FILE.',
+)
+@click.option(
+    '-T',
+    '--total',
+    'total_sample',
+    type=int,
+    help='Total number of words to sample.',
+)
+@click.option(
+    '-m',
+    '--min',
+    'min_sample',
+    type=int,
+    help='Min number of non-5 familiarity scored words to sample',
+)
+@pronounce_opt
+@click.option(
+    '-d',
+    '--dbfile',
+    type=click.Path(
+        exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    help='The database file.',
+)
+@click.option(
+    '-C',
+    '--cachedir',
+    type=click.Path(
+        exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    help=('If specified neither here nor in the configuration file, '
+          'no cache will be made.'),
+)
+@click.option(
+    '--mwapi',
+    'api_key',
+    metavar='API_KEY',
+    help='The Merriam-Webster API key for pronouncing aloud.',
+)
+def main(
+    total_sample: int,
+    min_sample: int,
+    do_pronounce: bool,
+    dbfile: Path,
+    cachedir: Path,
+    api_key: str,
+):
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        click.echo('ERROR: stdin and stdout must be interactive', err=True)
+        sys.exit(1)
     try:
-        unfamiliar_indices = []
-        with VocabBook(cfg.nbfile, colname2ids) as book:
-            fam = book['F']
-            sampled_ind = sample_vocab(fam, cfg.total, cfg.min)
-            T = len(sampled_ind)
-            if (cfg.pronounce and use_requests and cfg.mwapi and cfg.cachedir
-                    and sys.platform == 'darwin'):
-                prs = load_pronunciation(book, sampled_ind, cfg.mwapi,
-                                         cfg.cachedir)
+        unfamiliar_words = []
+        with VocabBook(dbfile) as book:
+            word_fams = book.get_all_fam()
+            words = np.array([x.word for x in word_fams])
+            fam = np.array([x.familiarity for x in word_fams])
+            sampled_words = sample_vocab(words, fam, total_sample, min_sample)
+            total = len(sampled_words)
+            if do_pronounce and USE_PRONOUNCE and api_key and cachedir:
+                cachedir.mkdir(parents=True, exist_ok=True)
+                prs = pronounce.load_pronunciation(sampled_words, api_key,
+                                                   cachedir)
             else:
                 prs = {}
-            for i, j in enumerate(sampled_ind, 1):
-                familiar = qa_interface(book, j, i, T, prs)
+            for i, word in enumerate(sampled_words, 1):
+                familiar = qa_interface(book, i, word, total, prs)
                 if not familiar:
-                    unfamiliar_indices.append(j)
-            review_interface(book, unfamiliar_indices)
+                    unfamiliar_words.append(word)
+            review_interface(book, unfamiliar_words)
     except (KeyboardInterrupt, EOFError):
-        print('Aborted', file=sys.stderr)
+        click.echo('Aborted', err=True)
+        sys.exit(130)

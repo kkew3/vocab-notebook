@@ -30,7 +30,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'vocabnb = vocabnb:main',
+            'vocabnb = vocabnb.vocabnb:main',
         ],
     },
 )
