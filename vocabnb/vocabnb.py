@@ -347,12 +347,14 @@ def query(dbfile: Path, word: str):
     """
     with VocabBook(dbfile) as book:
         word_def = book.get_word_def(word)
-        if word_def:
-            yaml.dump(
-                dataclasses.asdict(word_def),
-                stream=sys.stdout,
-                allow_unicode=True,
-                sort_keys=False)
+    if word_def is not None:
+        yaml.dump(
+            dataclasses.asdict(word_def),
+            stream=sys.stdout,
+            allow_unicode=True,
+            sort_keys=False)
+    else:
+        sys.exit(1)
 
 
 @click.command()

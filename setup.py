@@ -21,7 +21,7 @@ def get_pronounce_dep_helper():
 setup(
     name='vocabnb',
     packages=['vocabnb'],
-    version='0.4.0',
+    version='0.4.1',
     python_requires='>=3.9',
     install_requires=read_requirements(),
     extras_require={
