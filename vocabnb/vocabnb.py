@@ -5,12 +5,13 @@ import dataclasses
 import contextlib
 import sqlite3
 import datetime
-from typing import Literal
+from typing import Literal, BinaryIO
 
 import numpy as np
 import tomli
 import colorama
 import click
+import yaml
 
 from vocabnb import db
 try:
@@ -92,7 +93,10 @@ class VocabBook:
         self._memo = []
 
     def get_word_def(self, word: str):
-        return WordDef(**db.find_word(self.conn, word))
+        word_def = db.find_word(self.conn, word)
+        if word_def:
+            return WordDef(**word_def)
+        return None
 
     def get_all_fam(self):
         return [WordFam(**row) for row in db.find_all_words_fam(self.conn)]
@@ -159,6 +163,7 @@ def qa_interface(
     with proc:
         _ = input('[any key] ')
         word_def = book.get_word_def(word)
+        assert word_def is not None
         print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {word_def.meaning}')
         for k, e in enumerate(word_def.examples, 1):
             print(f'{Colors.BOLD_CYAN}Example #{k} ->{Colors.RESET} {e}')
@@ -207,6 +212,7 @@ def review_interface(book: VocabBook, words: list[str]) -> None:
     for i, word in enumerate(words, 1):
         print()
         word_def = book.get_word_def(word)
+        assert word_def is not None
         print(f'{Colors.BOLD_RED}->{Colors.RESET} {word} '
               f'{Colors.BOLD_RED}[{i}/{T}]{Colors.RESET}')
         print(f'{Colors.BOLD_CYAN}Meaning ->{Colors.RESET} {word_def.meaning}')
@@ -219,6 +225,7 @@ def read_config(ctx, _param, value):
         with open(value, 'rb') as infile:
             config = tomli.load(infile)
         config['cachedir'] = Path(config['cachedir']).expanduser()
+        config['dbfile'] = Path(config['dbfile']).expanduser()
         ctx.default_map = config
 
 
@@ -236,13 +243,7 @@ else:
         ' /--no-pronounce',
         'do_pronounce',
         help='Pronunciation has been disabled.')
-
-
-@click.command(
-    context_settings={'auto_envvar_prefix': 'VOCABNB'},
-    help='Vocabulary notebook sampler.',
-)
-@click.option(
+config_file_opt = click.option(
     '-f',
     '--config',
     'config_file',
@@ -253,6 +254,19 @@ else:
     expose_value=False,
     help='Read config from FILE.',
 )
+dbfile_opt = click.option(
+    '-d',
+    '--dbfile',
+    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    help='The database file.',
+)
+
+
+@click.command(
+    context_settings={'auto_envvar_prefix': 'VOCABNB'},
+    help='Vocabulary notebook sampler.',
+)
+@config_file_opt
 @click.option(
     '-T',
     '--total',
@@ -268,13 +282,7 @@ else:
     help='Min number of non-5 familiarity scored words to sample',
 )
 @pronounce_opt
-@click.option(
-    '-d',
-    '--dbfile',
-    type=click.Path(
-        exists=True, file_okay=True, dir_okay=False, path_type=Path),
-    help='The database file.',
-)
+@dbfile_opt
 @click.option(
     '-C',
     '--cachedir',
@@ -289,7 +297,7 @@ else:
     metavar='API_KEY',
     help='The Merriam-Webster API key for pronouncing aloud.',
 )
-def main(
+def sample(
     total_sample: int,
     min_sample: int,
     do_pronounce: bool,
@@ -322,3 +330,100 @@ def main(
     except (KeyboardInterrupt, EOFError):
         click.echo('Aborted', err=True)
         sys.exit(130)
+
+
+@click.command()
+@config_file_opt
+@dbfile_opt
+@click.argument('word')
+def query(dbfile: Path, word: str):
+    """
+    Query word definition.
+    """
+    with VocabBook(dbfile) as book:
+        word_def = book.get_word_def(word)
+        if word_def:
+            yaml.dump(
+                word_def,
+                stream=sys.stdout,
+                allow_unicode=True,
+                sort_keys=False)
+
+
+@click.command()
+@config_file_opt
+@dbfile_opt
+@click.argument('word')
+def delete(dbfile: Path, word: str):
+    """
+    Delete word definition.
+    """
+    with VocabBook(dbfile) as book:
+        db.delete_word(book.conn, word)
+
+
+@click.command()
+@config_file_opt
+@dbfile_opt
+@click.argument('word_def_file', type=click.File('rb'))
+def upsert(dbfile: Path, word_def_file: BinaryIO):
+    """
+    Upsert word definition by reading word definition yaml, as written by
+    `query` command. Pass in a yaml file or `-` to read from stdin.
+    """
+    word_def_dict = yaml.safe_load(word_def_file)
+    if not isinstance(word_def_dict, dict):
+        click.echo('ERROR: word_def_file should contain a dict', err=True)
+        sys.exit(1)
+    word_def_dict.setdefault('pronunciation')
+    word_def_dict.setdefault('familiarity', 5)
+    word_def_dict.setdefault('examples', [])
+    word_def = WordDef(**word_def_dict)
+    with VocabBook(dbfile) as book:
+        db.upsert_word(book.conn, word_def.word, word_def.meaning,
+                       word_def.pronunciation, word_def.examples,
+                       word_def.familiarity)
+
+
+@click.command()
+def upsert_template():
+    """Print the yaml template required by `upsert`."""
+    template = '''\
+# The word to upsert.
+word: <word>
+# The meaning.
+meaning: <meaning>
+# The pronunciation (optional, nullable).
+pronunciation: null
+# A list of examples (optinoal).
+examples:
+- <example1>
+- <example2>
+# The familiarity (optional).
+familiarity: 5'''
+    click.echo(template)
+
+
+@click.command(name='ls')
+@config_file_opt
+@dbfile_opt
+def list_words(dbfile: Path):
+    """List all words in arbitrary order."""
+    with VocabBook(dbfile) as book:
+        for word_fam in book.get_all_fam():
+            click.echo(word_fam.word)
+
+
+@click.group()
+def main():
+    """
+    The vocabulary book cli.
+    """
+
+
+main.add_command(sample)
+main.add_command(query)
+main.add_command(delete)
+main.add_command(upsert)
+main.add_command(upsert_template)
+main.add_command(list_words)
