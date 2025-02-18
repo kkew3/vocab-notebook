@@ -84,9 +84,11 @@ class VocabBook:
     def __init__(self, db_file: Path | sqlite3.Connection):
         if isinstance(db_file, sqlite3.Connection):
             self.conn = db_file
+            self._need_close = False
         else:
             self.conn = sqlite3.connect(db_file)
             db.init_db_if_not_exists(self.conn)
+            self._need_close = True
         # Words whose familiarity scores have been updated.
         self._updated_word_fam = []
         # Memo
@@ -123,6 +125,8 @@ class VocabBook:
                 db.update_word_familiarities(self.conn, self._updated_word_fam,
                                              True)
                 db.insert_memos(self.conn, self._memo, True)
+        if self._need_close:
+            self.conn.close()
 
 
 class Colors:
