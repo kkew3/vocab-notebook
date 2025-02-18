@@ -1,6 +1,7 @@
 import json
 from sqlite3 import Connection
 import datetime
+import contextlib
 from typing import Literal
 
 TABLE_NAME_WORDS = 'words'
@@ -67,6 +68,7 @@ def insert_memo(
     date: datetime.datetime,
     orig_familiarity: int,
     action: Literal['+', '=', '-', '.'] | int,
+    within_transaction: bool = False,
 ):
     """
     Insert a memo.
@@ -76,13 +78,38 @@ def insert_memo(
     :param date: the date of the memo
     :param orig_familiarity: the original familiarity of the word
     :param action: the memo action taken on the word
+    :param within_transaction: True if the invocation of this function is
+           already in a `with conn` statement
     """
-    with conn:
+    trans = contextlib.nullcontext() if within_transaction else conn
+    with trans:
         conn.execute(
             f'''\
 INSERT INTO {TABLE_NAME_MEMO} (word, date, orig_familiarity, action)
 VALUES (?, ?, ?, ?)''',
             (word, date.isoformat(), orig_familiarity, str(action)))
+
+
+def insert_memos(
+    conn: Connection,
+    args: list[tuple[str, datetime.datetime, int,
+                     Literal['+', '=', '-', '.'] | int]],
+    within_transaction: bool = False,
+):
+    """
+    Insert memos in batch.
+
+    :param conn: the sqlite3 connection
+    :param args: list of (word, date, orig_familiarity, action)
+    :param within_transaction: True if the invocation of this function is
+           already in a `with conn` statement
+    """
+    trans = contextlib.nullcontext() if within_transaction else conn
+    with trans:
+        conn.executemany(
+            f'''\
+INSERT INTO {TABLE_NAME_MEMO} (word, date, orig_familiarity, action)
+VALUES (?, ?, ?, ?)''', args)
 
 
 def delete_word(conn: Connection, word: str):
@@ -114,6 +141,19 @@ def find_all_words(conn: Connection):
         'examples': json.loads(row[3]),
         'familiarity': row[4],
     } for row in results]
+
+
+def find_all_words_fam(conn: Connection):
+    """
+    Find all words and their familiarities in arbitrary order.
+
+    :param conn: the sqlite3 connection
+    :return: a list of word familiarities
+    """
+    cur = conn.cursor()
+    cur.execute(f'SELECT word, familiarity FROM {TABLE_NAME_WORDS}')
+    results = cur.fetchall()
+    return [{'word': row[0], 'familiarity': row[1]} for row in results]
 
 
 def find_word(conn: Connection, word: str):
@@ -163,15 +203,43 @@ def find_word_memo(conn: Connection, word: str):
     } for row in results]
 
 
-def update_word_familiarity(conn: Connection, word: str, familiarity: int):
+def update_word_familiarity(
+    conn: Connection,
+    familiarity: int,
+    word: str,
+    within_transaction: bool = False,
+):
     """
     Update the familiarity of a word.
 
     :param conn: the sqlite3 connection
-    :param word: the word to update
     :param familiarity: the new familiarity
+    :param word: the word to update
+    :param within_transaction: True if the invocation of this function is
+           already in a `with conn` statement
     """
-    with conn:
+    trans = contextlib.nullcontext() if within_transaction else conn
+    with trans:
         conn.execute(
             f'UPDATE {TABLE_NAME_WORDS} SET familiarity = ? WHERE word = ?',
             (familiarity, word))
+
+
+def update_word_familiarities(
+    conn: Connection,
+    args: list[tuple[int, str]],
+    within_transaction: bool = False,
+):
+    """
+    Update familiarities in batch.
+
+    :param conn: the sqlite3 connection
+    :param args: list of (familiarity, word).
+    :param within_transaction: True if the invocation of this function is
+           already in a `with conn` statement
+    """
+    trans = contextlib.nullcontext() if within_transaction else conn
+    with trans:
+        conn.executemany(
+            f'UPDATE {TABLE_NAME_WORDS} SET familiarity = ? WHERE word = ?',
+            args)
