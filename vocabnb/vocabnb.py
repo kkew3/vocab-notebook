@@ -228,7 +228,8 @@ def read_config(ctx, _param, value):
     with contextlib.suppress(FileNotFoundError):
         with open(value, 'rb') as infile:
             config = tomli.load(infile)
-        config['cachedir'] = Path(config['cachedir']).expanduser()
+        if 'cachedir' in config:
+            config['cachedir'] = Path(config['cachedir']).expanduser()
         config['dbfile'] = Path(config['dbfile']).expanduser()
         ctx.default_map = config
 
@@ -306,8 +307,8 @@ def sample(
     min_sample: int,
     do_pronounce: bool,
     dbfile: Path,
-    cachedir: Path,
-    api_key: str,
+    cachedir: Path | None,
+    api_key: str | None,
 ):
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         click.echo('ERROR: stdin and stdout must be interactive', err=True)
