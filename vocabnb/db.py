@@ -38,6 +38,7 @@ def upsert_word(
     pronunciation: str | None,
     examples: list[str],
     familiarity: int = 5,
+    within_transaction: bool = False,
 ):
     """
     Upsert a word.
@@ -48,8 +49,11 @@ def upsert_word(
     :param pronunciation: the pronunciation of the word
     :param examples: examples of the word
     :param familiarity: 5 means unfamiliar, 1 means familiar
+    :param within_transaction: True if the invocation of this function is
+           already in a `with conn` statement
     """
-    with conn:
+    trans = contextlib.nullcontext() if within_transaction else conn
+    with trans:
         conn.execute(
             f'''\
 INSERT INTO {TABLE_NAME_WORDS} (word, meaning, pronunciation, examples, familiarity)
