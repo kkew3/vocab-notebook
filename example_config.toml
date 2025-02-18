@@ -1,7 +1,14 @@
-# rename this file as ~/.config/vocabnb/config.toml to take effect
+# 将此文件重命名并移动至 ~/.config/vocabnb/config.toml 以启用配置文件
+
+# 每次一共抽样这么多单词来背
 total_sample = 50
+# 每次至少抽样这么多不是完全不会的单词来背
 min_sample = 10
+# 是否启用单词发音功能
 do_pronounce = false
+# 数据库文件想要放在哪里
 dbfile = "~/Documents/words.db"
+# 单词读音文件想要缓存在哪里，如果不想启用发音，可以不指定
 cachedir = "~/.cache/vocabnb"
+# 用于请求单词发音的 Merriam-Webster API，如果不想启用发音，可以不指定
 mwapi = "**************"
