@@ -192,7 +192,7 @@ def qa_interface(
             fam_change = min(5, max(0, int(fam_change)))
         if word in prs and USE_PRONOUNCE:
             proc.terminate()
-    today = datetime.datetime.now()
+    today = datetime.datetime.combine(datetime.date.today(), datetime.time())
     book.add_memo(word, today, familiarity, fam_change)
     if fam_change == '.':
         new_fam = familiarity
