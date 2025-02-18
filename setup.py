@@ -22,6 +22,7 @@ setup(
     name='vocabnb',
     packages=['vocabnb'],
     version='0.4.0',
+    python_requires='>=3.9',
     install_requires=read_requirements(),
     extras_require={
         'dev': read_requirements('dev'),
